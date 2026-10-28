@@ -206,6 +206,13 @@ fine-grained 需要 `Contents: read/write` + `Administration: read/write` + `Met
   并写一条 `warnings` 说明；publish 时 auth 步骤标 skipped。
 - 若插件目录不是 git 仓库，`worktree` 提示将 `git init`。
 - 若 `repoExistsStrategy=error` 且仓库已存在 → `repo` check `fail`。
+- 新增 `target` check：`form.name ≠ sanitize(plugin.name)` 时给出告警；若同时目标仓库**已存在**且本地插件没有
+  关联 git 历史（`!hasGit || !hasCommits`）→ `fail`（防止切换插件后把 A 项目推到 B 的已有仓库）。
+- 新增 `repo-history` check：目标仓库已存在而本地是全新仓库时告警（non-fast-forward 风险，建议新建空仓库）。
+- 新增 `workflow-scope` check：插件目录含 `.github/workflows/**` 时校验 token 权限——classic token 缺 `workflow`
+  scope → `fail`（GitHub 会拒绝整次 push）；fine-grained token → `warn`（需 Workflows: Read and write）。
+  推送被拒的错误先按 server-side 原因分类：`workflow-scope` / `non-fast-forward` / `branch-protected` / 其它，
+  不再把 workflow 权限问题误报成 non-fast-forward。
 - Owner 不是登录账号时，会先 `GET /orgs/{owner}` 校验组织：不存在/无权访问 → `repo` check `fail`
   （消息指出实际登录名并要求改 Owner）；发布流程在建仓前会再次校验，避免 `POST /orgs/...` 的 404 裸错。
 - 输错路径 / 无 package.json / 无 dsh 声明 → `fail` + 顶层 `400` 或检查失败二者择一：

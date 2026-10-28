@@ -21,7 +21,7 @@ import { promisify } from 'node:util'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const pluginRoot = path.join(here, '..')
-const { isTransientGitTransportError } = await import(path.join(pluginRoot, 'lib/publisher.mjs'))
+const { isTransientGitTransportError, classifyPushFailure } = await import(path.join(pluginRoot, 'lib/publisher.mjs'))
 const run = promisify(execFile)
 
 const checks = []
@@ -78,11 +78,24 @@ await fsp.writeFile(path.join(mismatchDir, 'package.json'), `${JSON.stringify({
 }, null, 2)}\n`)
 await fsp.writeFile(path.join(mismatchDir, 'index.js'), 'export function apply() {}\n')
 await fsp.writeFile(path.join(mismatchDir, 'cordis.patch.yml'), '- insert: []\n')
+const workflowDir = path.join(workspaceDir, 'workflow-plugin')
+await fsp.mkdir(path.join(workflowDir, '.github', 'workflows'), { recursive: true })
+await fsp.writeFile(path.join(workflowDir, 'package.json'), `${JSON.stringify({
+  name: 'workflow-plugin',
+  version: '0.1.0',
+  private: true,
+  description: 'A plugin that ships GitHub Actions workflows. · 带 workflow 的示例。',
+  dsh: { bundle: { patch: './cordis.patch.yml' } },
+}, null, 2)}\n`)
+await fsp.writeFile(path.join(workflowDir, 'index.js'), 'export function apply() {}\n')
+await fsp.writeFile(path.join(workflowDir, 'cordis.patch.yml'), '- insert: []\n')
+await fsp.writeFile(path.join(workflowDir, '.github', 'workflows', 'ci.yml'), 'name: CI\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n')
 await fsp.writeFile(path.join(pluginDir, 'icon.svg'), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8"/></svg>\n')
 
 /* ── mock GitHub API (127.0.0.1) ──────────────────────────────────────────── */
 
 const mockRequests = []
+let mockScopes = 'repo'
 const mock = http.createServer((req, res) => {
   let body = ''
   req.on('data', (chunk) => { body += chunk })
@@ -113,7 +126,7 @@ const mock = http.createServer((req, res) => {
     }
     if (req.url === '/user') {
       if (auth === 'Bearer good-token-value') {
-        res.setHeader('x-oauth-scopes', 'repo')
+        res.setHeader('x-oauth-scopes', mockScopes)
         return send(200, { login: 'octocat', id: 1, name: 'The Octocat', avatar_url: 'https://example.test/a.png', html_url: 'https://github.com/octocat' })
       }
       return send(401, { message: 'Bad credentials' })
@@ -368,6 +381,27 @@ response = await apiPost('/preflight', { path: pluginDir, form: { dryRun: true, 
 const mismatchFail = response.json.checks.find((entry) => entry.id === 'target')
 check('stale repo name + existing repo + fresh local history blocks publish', mismatchFail?.status === 'fail' && response.json.canPublish === false && response.json.blocking.includes('target'), JSON.stringify(mismatchFail))
 check('blocking message explains the stale plugin/repo mismatch', /当前选中的插件是 sample-plugin/.test(mismatchFail?.detail || '') && /non-fast-forward/.test(mismatchFail?.detail || ''))
+
+/* ── GitHub workflow scope guard (.github/workflows requires workflow scope) ─ */
+
+check('workflow push rejection is classified as workflow-scope', classifyPushFailure("remote: refusing to allow a Personal Access Token to create or update workflow `.github/workflows/build-site.yml` without `workflow` scope") === 'workflow-scope')
+check('fetch-first rejection is classified as non-fast-forward', classifyPushFailure('! [rejected] HEAD -> main (fetch first)') === 'non-fast-forward')
+check('protected branch rejection is classified as branch-protected', classifyPushFailure('remote: error: GH006: Protected branch update failed') === 'branch-protected')
+check('unknown rejection falls back to other', classifyPushFailure('something else happened') === 'other')
+
+response = await apiPost('/preflight', { path: workflowDir, form: { dryRun: false } })
+const workflowFailCheck = response.json.checks.find((entry) => entry.id === 'workflow-scope')
+check('preflight fails when the token lacks the workflow scope', workflowFailCheck?.status === 'fail' && response.json.canPublish === false && response.json.blocking.includes('workflow-scope'), JSON.stringify(workflowFailCheck))
+check('workflow failure message points at the PAT scopes', /repo \+ workflow|Workflows: Read and write/.test(workflowFailCheck?.detail || '') && workflowFailCheck?.fix === 'settings')
+
+mockScopes = 'repo,workflow'
+response = await apiPost('/token', { token: 'good-token-value' })
+check('re-saving the token refreshes the cached scopes', response.status === 200 && (response.json.account.scopes || []).includes('workflow'))
+response = await apiPost('/preflight', { path: workflowDir, form: { dryRun: false } })
+const workflowPassCheck = response.json.checks.find((entry) => entry.id === 'workflow-scope')
+check('preflight passes once the token carries the workflow scope', workflowPassCheck?.status === 'pass' && response.json.canPublish === true, JSON.stringify(workflowPassCheck))
+mockScopes = 'repo'
+await apiPost('/token', { token: 'good-token-value' })
 
 /* ── drafts ───────────────────────────────────────────────────────────────── */
 

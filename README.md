@@ -46,7 +46,7 @@ plugin_manager action=install_bundle target=/absolute/path/to/dsh-github-publish
 
 1. 打开发布台 → 右上角「设置」（未连接账号时页面顶部也有提示条）。
 2. 点「生成 Personal Access Token」打开 GitHub 授权页（已预填 `repo` scope）；或手动到 <https://github.com/settings/tokens> 创建。
-   - **Classic token**：勾选 `repo`（要发私有仓库必须）；如需写入 workflow 文件再加 `workflow`。
+   - **Classic token**：勾选 `repo`（要发私有仓库必须）；**如果插件目录包含 `.github/workflows/`，还必须勾选 `workflow`**，否则 GitHub 会拒绝整个推送。Classic PAT 的权限创建后不可修改，需要新建/regenerate 一个带 `repo` + `workflow` 的 token。
    - **Fine-grained token**：仓库权限 `Contents: Read and write`、`Administration: Read and write`、`Metadata: Read-only`。
 3. 粘贴到 token 输入框 →「保存并验证」。成功后显示 `@你的用户名`、token 掩码（如 `ghp_…a1b2`）与来源。
 4. 也可点「自动检测」：依次尝试 `GITHUB_TOKEN` / `GH_TOKEN` 环境变量、`gh auth token`、`git credential` 中已保存的 github.com 凭证；检测到的 token 默认只放内存，点「保存」才落盘。
@@ -139,7 +139,8 @@ plugin_manager action=install_bundle target=/absolute/path/to/dsh-github-publish
 | 发布失败：`HTTP 404，POST /orgs/xxx/repos` | Owner 填错了：GitHub 个人账号的 Owner 必须填**登录名**（login，如 `Sun-0306`），不是昵称/显示名（如 `Sun`），也不是组织页面的显示名。预检现在会直接提示「GitHub 上找不到该账号/组织」并把 Owner 字段标为待修改；改对后重新预检即可。 |
 | 之前失败过的插件 package.json 指向了错误仓库 | 新版发布时会把 `repository` / `homepage` / `bugs` 中指向其它 GitHub owner/repo 的过期地址自动更正为本次发布目标（预检的 package.json 变更里会显示），无需手改。 |
 | 「预检未通过：仓库已存在」 | 把「仓库已存在时」改为「复用」，或修改仓库名 |
-| 推送被拒绝（non-fast-forward） | 远端已有不同历史：换仓库名，或确认后勾选 force-with-lease |
+| 推送被拒绝（fetch first / remote contains work that you do not have locally） | 目标仓库在 GitHub 上已有与本地不同的历史。常见原因：① 目标仓库之前用别的插件/网页初始化过；② **选中的插件与表单里的仓库名不匹配**（例如切换插件后残留了上一个插件的仓库名）。处理：换一个新仓库名（推荐）；或确认要覆盖后勾选「高级选项 → force-with-lease」；或先在本地 `git pull --allow-unrelated-histories <仓库URL> main` 合并再发布。新版预检会直接拦「当前插件与目标仓库不匹配且仓库已存在」的情况。 |
+| 推送被拒：`refusing to allow a Personal Access Token to create or update workflow ... without workflow scope` | token 缺少 `workflow` 权限，而插件里有 `.github/workflows/**`。重新生成 Classic PAT 并勾选 `repo` + `workflow`（或 fine-grained token 加 Workflows: Read and write），在设置里保存后重新发布即可；本地 commit 与已建的空仓库都会保留。 | 
 | `Error in the HTTP2 framing layer` / 连接 GitHub 超时 | 本机到 GitHub 的 **HTTP/2** 链路不稳定（常见于代理/VPN 环境）。插件已默认用 **HTTP/1.1** 推送并自动重试，无需手动处理；极端情况下可设环境变量 `DSH_GITHUB_PUBLISHER_GIT_HTTP_VERSION=auto` 恢复 HTTP/2 优先，或在系统终端执行一次 `git config --global http.version HTTP/1.1`。远端仓库与本地 commit 都会保留，重新发布即可续传。 |
 | 提交失败 `Please tell me who you are` | 填写作者名/邮箱，或在系统里 `git config --global user.name/user.email` |
 | 文件写入了但没推送成功 | 本地文件与 commit 保留；修复原因后重新发布即可（幂等，不会重复建仓/重复 Release） |

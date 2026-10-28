@@ -439,3 +439,75 @@ Agent 工具 `action=suggest` + 发布信息卡片「AI 补全信息」按钮）
 - 外部校验：`git -c http.version=HTTP/1.1 ls-remote` 显示 `refs/heads/main=ea9adb5` 与 `refs/tags/v0.5.0`；
   GitHub 匿名 API `/repos/Sun-0306/dsh-code-runner` 与 `/releases/latest` 均返回 200；history 记录 succeeded。
 - 测试：`npm run test:all` → **EXIT 0，624/624**（host-sim 81）。
+
+---
+
+## 14. 真实发布：推送被拒（non-fast-forward）诊断与修复（Lead 补记，2026-10-28 10:5x）
+
+### 14.1 现象
+用户发布时失败（`history` 记录 `git-push-rejected`）：
+`! [rejected] HEAD -> main (fetch first)` → `remote contains work that you do not have locally`，
+目标 `https://github.com/Sun-0306/dsh-context-summarizer.git`。
+
+### 14.2 根因（用失败 job 快照 + 本地仓库状态核实）
+- 失败 job 的 `path` 是 `/Users/sunchujun/Desktop/deepseek/dsh-github-publisher`（源插件是**发布台自身**），
+  `inspect` 显示 `dsh-github-publisher 0.1.0`，但 `form.name` 是 **`dsh-context-summarizer`**：
+  选中的插件与表单里的仓库名不一致（切换插件后的残留名称/手填名称）。
+- 该目标仓库在 1 分钟前刚被用户成功发布过 `dsh-context-summarizer v0.2.0`（`d091c2c`），
+  远端已有历史；而本地 `dsh-github-publisher` 目录当时还不是 git 仓库，发布时新建了**无共同祖先**的提交
+  `ba3d3a0` → Git 正确地以 non-fast-forward 拒绝，避免把另一个项目推进已有仓库。
+- 副作用：失败作业的 prepare 步骤把 `dsh-github-publisher/package.json` 的 `repository/homepage/bugs/author/keywords`
+  写成了 summarizer 仓库信息，并新建了 `.git`（错误 remote）。**已恢复**（移除 `.git`、还原 package.json）。
+
+### 14.3 修复
+1. **预检 `target` 检查**：`form.name ≠ sanitize(plugin.name)` 时告警；当目标仓库已存在且本地插件没有关联
+   git 历史时直接 **fail**（阻止发布并提示“当前选中的插件是 X，但目标仓库名是 Y”）。
+2. **预检 `repo-history` 检查**：目标仓库已存在而本地是全新仓库 → 告警 non-fast-forward 风险。
+3. **推送被拒错误**改为三条可执行路径：换新仓库名（推荐）/ force-with-lease 覆盖 / 本地
+   `git pull --allow-unrelated-histories <url> <branch>` 合并后重试；并提示核对选中插件。
+4. 恢复本地状态：`dsh-github-publisher/.git` 已移除，`package.json` 已还原为发布前内容
+   （name/version/private/type/description/icon/license/exports/files/scripts/dsh）。
+5. 测试：`npm run test:all` → **EXIT 0，627/627**（host-sim **84**：新增 mismatch fail/warn 断言）。
+
+### 14.4 顺手完成的正确发布
+用户本次操作实际想发布的是「GitHub 发布台」自身；已用干净副本（不含误建 `.git`）正确发布：
+- 仓库：https://github.com/Sun-0306/dsh-github-publisher （public，28 files）
+- commit：`5ef07895b85365b1f4566062cb08cc8c3ec2493c`；tag / Release：`v0.1.0`
+- 外部校验：远端 `refs/heads/main`、`refs/tags/v0.1.0` 正常；clone 后 `package.json.repository`
+  指向正确仓库，README 为插件说明。
+- `dsh-context-summarizer` 仓库未被本次失败污染，仍是之前成功的 `v0.2.0`。
+
+---
+
+## 15. 真实发布：workflow scope 被拒诊断与修复（Lead 补记，2026-10-28 11:45）
+
+### 15.1 现象
+发布 `dshmarket` 时 push 失败，旧代码把它误报成 non-fast-forward：
+`! [remote rejected] HEAD -> main (refusing to allow a Personal Access Token to create or update
+workflow `.github/workflows/build-site.yml` without `workflow` scope)`。
+实际上远端仓库是本次刚创建的空仓库（无任何 ref），**不是** non-fast-forward。
+
+### 15.2 根因
+- `dsh-market` 本地仓库包含 4 个 `.github/workflows/*.yml`（build-site / release / ci / site-health），
+  其 git 历史（baseline 提交）就会引入这些 workflow 文件。
+- 当前 token 是 Classic PAT，scopes 只有 `repo`（`config.account.scopes=['repo']`）；GitHub 规定
+  **创建/更新 workflow 文件需要 `workflow` scope**（fine-grained 需要 Workflows: Read and write），
+  否则拒绝整个 ref 更新。
+- 旧推送错误分类用宽泛的 `/rejected/i` 命中，先于原因判断，导致误报为 non-fast-forward 并给出错误处理建议。
+
+### 15.3 修复
+1. 新增 `classifyPushFailure()`：按 server-side 原因分类 `workflow-scope` / `non-fast-forward` /
+   `branch-protected` / `other`，workflow 优先，避免误报。
+2. workflow 专用错误消息：明确说明缺 `workflow` 权限，并给出 Classic PAT 生成链接
+   （`scopes=repo,workflow`）、fine-grained 权限组合，以及“本地 commit/空仓库保留、更新 token 后从推送续传”的说明。
+3. 预检新增 `workflow-scope` check：扫描插件目录 `.github/workflows/**`（`listWorkflowFiles`），
+   按 token 已知 scopes 判定：classic 缺 workflow → **fail** 阻止发布；fine-grained → warn 提示所需权限；
+   有权限 → pass。
+4. 本地仓库状态：`dsh-market` 保留提交 `2133aa6`，远端 `Sun-0306/dshmarket` 已创建（空仓库）；
+   token 更新后重新发布即可推送历史 + tag + Release。
+5. 测试：`npm run test:all` → **EXIT 0，635/635**（host-sim **92**：新增 workflow 分类/预检 fail→pass 断言）。
+
+### 15.4 用户下一步
+重新生成一个带 `repo` + `workflow` 的 Classic PAT（或 fine-grained token 加 Workflows: Read and write），
+在发布台「设置」粘贴保存后，对 `dshmarket` 重新预检并发布：预检的 `workflow-scope` 会变为 pass，
+推送会续传本次已创建的提交。

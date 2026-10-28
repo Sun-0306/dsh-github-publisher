@@ -377,7 +377,9 @@ try {
   for (const name of ['config.json', 'history.json', 'drafts.json']) if (await exists(name)) leakedDataFiles.push(name)
   check('no data-dir files leaked into the repository root', leakedDataFiles.length === 0, leakedDataFiles.join(','))
   const rootEntries = (await dirEntries('.')).map((entry) => entry.name).sort()
-  const allowedRoot = new Set(['CONTRACT.md', 'README.md', 'client.js', 'cordis.patch.yml', 'icon.svg', 'index.js', 'lib', 'locale', 'package.json', 'tests', 'LICENSE', 'VERIFICATION.md', '.gitignore'])
+  // A root .git is legitimate once the plugin is itself published to GitHub
+  // (this repository is published from this directory); nested .git dirs are not.
+  const allowedRoot = new Set(['CONTRACT.md', 'README.md', 'client.js', 'cordis.patch.yml', 'icon.svg', 'index.js', 'lib', 'locale', 'package.json', 'tests', 'LICENSE', 'VERIFICATION.md', '.gitignore', '.git'])
   const unexpectedRoot = rootEntries.filter((name) => !allowedRoot.has(name))
   check('repository root contains only declared project files', unexpectedRoot.length === 0, unexpectedRoot.join(','))
 
@@ -386,15 +388,17 @@ try {
     for (const entry of await dirEntries(relDir)) {
       const rel = relDir === '.' ? entry.name : `${relDir}/${entry.name}`
       out.push({ rel, entry })
-      if (entry.isDirectory()) out.push(...(await walk(rel)))
+      // Do not descend into the root .git (objects can be large); a nested .git
+      // is still reported below.
+      if (entry.isDirectory() && rel !== '.git') out.push(...(await walk(rel)))
     }
     return out
   }
   const tree = await walk('.')
   const nodeModules = tree.filter((item) => item.entry.isDirectory() && item.entry.name === 'node_modules').map((item) => item.rel)
   check('repository contains no node_modules directory', nodeModules.length === 0, nodeModules.join(','))
-  const gitDirs = tree.filter((item) => item.entry.isDirectory() && item.entry.name === '.git').map((item) => item.rel)
-  check('repository contains no .git directory', gitDirs.length === 0, gitDirs.join(','))
+  const gitDirs = tree.filter((item) => item.entry.isDirectory() && item.entry.name === '.git' && item.rel !== '.git').map((item) => item.rel)
+  check('repository contains no nested .git directory', gitDirs.length === 0, gitDirs.join(','))
   const tempArtifactRe = /(?:\.tmp-\d+|\.corrupt-\d+|\.log$|\.bak$|\.orig$|^\.DS_Store$|\.swp$|~$)/i
   const tempArtifacts = tree.filter((item) => item.entry.isFile() && tempArtifactRe.test(item.entry.name)).map((item) => item.rel)
   check('repository contains no temporary / backup artifacts', tempArtifacts.length === 0, tempArtifacts.join(','))
