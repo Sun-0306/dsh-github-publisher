@@ -1,0 +1,12 @@
+# dsh-github-publisher bundle patch: inserts the dual-face plugin row.
+#
+# The row is a bare plugin by package name. The node half (exports ".") runs in
+# the Host process: it owns the token-gated /dsh-github-publisher/api/* HTTP
+# surface, the GitHub/git publish pipeline, the JSON-backed settings + history
+# store, and the `github_publisher` agent tool. The `dsh.client` declaration in
+# package.json makes the browser half (exports "./client") load in the Web GUI,
+# where it contributes the left-sidebar "GitHub 发布台" row (id
+# `github-publisher`) and the keyed `main` page with the same key.
+- insert:
+    - id: dsh-github-publisher
+      name: dsh-github-publisher

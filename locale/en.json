@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "GitHub Publisher",
+    "description": "A left-sidebar GitHub publisher for local DSH plugins: scan installed plugins, auto-complete README, LICENSE, .gitignore and package.json, preflight, then create the repo, commit, push, tag and open a GitHub Release in one click — with live progress and result links on the page."
+  }
+}

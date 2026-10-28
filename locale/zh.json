@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "GitHub 发布台",
+    "description": "左侧栏 GitHub 发布台：扫描本机 DSH 插件，自动补全 README、LICENSE、.gitignore 与 package.json，预检后一键建仓、提交、推送、打 tag 并创建 Release，发布进度与结果链接都在页面上实时可见。"
+  }
+}

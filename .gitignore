@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Logs
+*.log
+
+# Local data / OS
+.DS_Store
+.env
+.env.*
+*.local
+
+# DSH local runtime notes
+.dsh-*
