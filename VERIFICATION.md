@@ -511,3 +511,9 @@ workflow `.github/workflows/build-site.yml` without `workflow` scope)`。
 重新生成一个带 `repo` + `workflow` 的 Classic PAT（或 fine-grained token 加 Workflows: Read and write），
 在发布台「设置」粘贴保存后，对 `dshmarket` 重新预检并发布：预检的 `workflow-scope` 会变为 pass，
 推送会续传本次已创建的提交。
+
+### 15.5 附：Agent 工具输出 JSON 兼容修复
+新增 workflow check 后，`github_publisher action=preflight` 在「仓库已存在」分支会带一个 `fix: undefined`
+属性；Agent 工具框架要求输出是 lossless JSON，会因此报 `value is not lossless JSON`。
+已在工具 execute 返回前做一次 JSON round-trip（`JSON.parse(JSON.stringify(value))`），丢弃 `undefined`
+属性；HTTP API 行为不变。复验：工具 preflight `dsh-market` 正确返回 `blocking:["workflow-scope"]`。

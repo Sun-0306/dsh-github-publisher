@@ -631,6 +631,14 @@ export function apply(ctx) {
           default:
             throw new PublisherError('bad-request', `未知 action：${action}`, { details: { actions } })
         }
+        // Tool results must be lossless JSON: a plain `undefined` property (e.g.
+        // a check's optional `fix`) would be dropped by the framework, so
+        // round-trip through JSON before returning.
+        try {
+          value = JSON.parse(JSON.stringify(value))
+        } catch {
+          /* primitives-only values are already JSON-safe */
+        }
         value.summary = toolSummary(action, value)
         return value
       },
